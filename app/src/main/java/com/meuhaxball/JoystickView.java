@@ -6,25 +6,32 @@ import android.graphics.Paint;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** Joystick virtual simples: informa quais das 4 direções estão ativas. */
+/**
+ * Joystick virtual de 8 direções. A cada toque informa quais das 4 teclas de
+ * direção devem estar pressionadas (diagonal = duas teclas ao mesmo tempo).
+ */
 public class JoystickView extends View {
 
     public interface Listener {
         void onDirection(boolean left, boolean right, boolean up, boolean down);
     }
 
-    private static final float DEADZONE = 0.30f;
+    private static final float DEADZONE = 0.28f;
 
     private final Paint basePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint thumbPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float thumbX, thumbY;
-    private boolean touching = false;
+    private boolean touching;
     private Listener listener;
 
     public JoystickView(Context context) {
         super(context);
-        basePaint.setColor(0x55FFFFFF);
-        thumbPaint.setColor(0xAAFFFFFF);
+        basePaint.setColor(0x40FFFFFF);
+        ringPaint.setStyle(Paint.Style.STROKE);
+        ringPaint.setStrokeWidth(UiKit.dp(context, 2));
+        ringPaint.setColor(0x80FFFFFF);
+        thumbPaint.setColor(0xB3FFFFFF);
     }
 
     public void setListener(Listener l) {
@@ -32,14 +39,20 @@ public class JoystickView extends View {
     }
 
     @Override
+    public boolean hasOverlappingRendering() {
+        return false;
+    }
+
+    @Override
     protected void onDraw(Canvas canvas) {
         float cx = getWidth() / 2f;
         float cy = getHeight() / 2f;
-        float radius = Math.min(getWidth(), getHeight()) / 2f;
+        float radius = Math.min(getWidth(), getHeight()) / 2f - ringPaint.getStrokeWidth();
         canvas.drawCircle(cx, cy, radius, basePaint);
+        canvas.drawCircle(cx, cy, radius, ringPaint);
         float tx = touching ? thumbX : cx;
         float ty = touching ? thumbY : cy;
-        canvas.drawCircle(tx, ty, radius * 0.4f, thumbPaint);
+        canvas.drawCircle(tx, ty, radius * 0.38f, thumbPaint);
     }
 
     @Override
@@ -55,16 +68,27 @@ public class JoystickView extends View {
                 float dx = e.getX() - cx;
                 float dy = e.getY() - cy;
                 float dist = (float) Math.sqrt(dx * dx + dy * dy);
-                if (dist > radius) {
-                    dx = dx / dist * radius;
-                    dy = dy / dist * radius;
+                float limited = Math.min(dist, radius);
+                if (dist > 0f) {
+                    thumbX = cx + dx / dist * limited;
+                    thumbY = cy + dy / dist * limited;
+                } else {
+                    thumbX = cx;
+                    thumbY = cy;
                 }
-                thumbX = cx + dx;
-                thumbY = cy + dy;
-                float nx = dx / radius;
-                float ny = dy / radius;
-                if (listener != null) {
-                    listener.onDirection(nx < -DEADZONE, nx > DEADZONE, ny < -DEADZONE, ny > DEADZONE);
+                if (dist / radius < DEADZONE) {
+                    emit(false, false, false, false);
+                } else {
+                    // 8 setores de 45 graus: 0=direita, 1=baixo-dir., 2=baixo, 3=baixo-esq.,
+                    // 4=esquerda, 5=cima-esq., 6=cima, 7=cima-dir. (eixo y cresce para baixo)
+                    int sector = (int) Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+                    if (sector < 0) sector += 8;
+                    if (sector == 8) sector = 0;
+                    boolean right = sector == 7 || sector == 0 || sector == 1;
+                    boolean down = sector == 1 || sector == 2 || sector == 3;
+                    boolean left = sector == 3 || sector == 4 || sector == 5;
+                    boolean up = sector == 5 || sector == 6 || sector == 7;
+                    emit(left, right, up, down);
                 }
                 invalidate();
                 return true;
@@ -72,10 +96,15 @@ public class JoystickView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 touching = false;
-                if (listener != null) listener.onDirection(false, false, false, false);
+                emit(false, false, false, false);
                 invalidate();
                 return true;
+            default:
+                return true;
         }
-        return super.onTouchEvent(e);
+    }
+
+    private void emit(boolean l, boolean r, boolean u, boolean d) {
+        if (listener != null) listener.onDirection(l, r, u, d);
     }
 }
